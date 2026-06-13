@@ -15,14 +15,61 @@ import traceback
 import undetected_chromedriver as uc
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
+from datetime import datetime, timezone, timedelta
 
 ns_random = os.environ.get("NS_RANDOM","false")
 cookie = os.environ.get("NS_COOKIE") or os.environ.get("COOKIE")
 # 通过环境变量控制是否使用无头模式，默认为 True（无头模式）
 headless = os.environ.get("HEADLESS", "true").lower() == "true"
 
-randomInputStr = ["bd","绑定","帮顶"]
+default_comments = [
+    "帮你顶一下",
+    "这个信息挺有用，感谢楼主",
+    "学习了，感谢整理",
+    "先关注一下后续反馈",
+    "这个思路可以参考，感谢分享",
+    "信息有帮助，支持一下",
+]
 
+env_comments = os.environ.get("NS_COMMENT_TEXTS", "").strip()
+
+if env_comments:
+    randomInputStr = [x.strip() for x in env_comments.split("|") if x.strip()]
+else:
+    randomInputStr = default_comments
+
+def should_run_now():
+    """
+    GitHub Actions 每小时触发一次。
+    这里按 UTC+8 每天随机抽一个小时，只有命中该小时才真正执行。
+    手动运行 workflow_dispatch 时直接执行，方便测试。
+    """
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+
+    if event_name == "workflow_dispatch":
+        print("手动触发，直接执行")
+        return True
+
+    now = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8)))
+    today = now.strftime("%Y-%m-%d")
+
+    seed = os.environ.get("NS_RANDOM_SEED", "nodeseek-daily")
+    random_source = random.Random(f"{today}-{seed}")
+
+    target_hour = random_source.randint(0, 23)
+    delay_minutes = random_source.randint(0, 45)
+
+    print(f"当前 UTC+8 时间：{now.strftime('%Y-%m-%d %H:%M')}")
+    print(f"今天随机执行小时：{target_hour}:00 - {target_hour}:59")
+
+    if now.hour != target_hour:
+        print("当前小时未命中，跳过本次执行")
+        return False
+
+    print(f"命中随机小时，延迟 {delay_minutes} 分钟后执行")
+    time.sleep(delay_minutes * 60)
+    return True
+    
 def click_sign_icon(driver):
     """
     尝试点击签到图标和试试手气按钮的通用方法
@@ -288,13 +335,16 @@ def click_chicken_leg(driver):
 
 if __name__ == "__main__":
     print("开始执行NodeSeek评论脚本...")
+
+    if not should_run_now():
+        exit(0)
+
     driver = setup_driver_and_cookies()
     if not driver:
         print("浏览器初始化失败")
         exit(1)
+
     nodeseek_comment(driver)
     click_sign_icon(driver)
-    print("脚本执行完成")
-    # while True:
-    #     time.sleep(1)
 
+    print("脚本执行完成")
