@@ -23,12 +23,15 @@ cookie = os.environ.get("NS_COOKIE") or os.environ.get("COOKIE")
 headless = os.environ.get("HEADLESS", "true").lower() == "true"
 
 default_comments = [
-    "帮你顶一下",
-    "这个信息挺有用，感谢楼主",
-    "学习了，感谢整理",
-    "先关注一下后续反馈",
-    "这个思路可以参考，感谢分享",
-    "信息有帮助，支持一下",
+    "截图发下看看",
+    "靠 这么便宜 不错",
+    "看着挺火的这机器，搜索后",
+    "好🐔啊。",
+    "好鸡绑定",
+    "插个眼 :xhj001: ",
+    "蹲一下看",
+    "还滴是佬友们啊",
+    " :xhj007: ",
 ]
 
 env_comments = os.environ.get("NS_COMMENT_TEXTS", "").strip()
