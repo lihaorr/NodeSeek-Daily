@@ -230,7 +230,7 @@ def nodeseek_comment(driver):
             except:
                 continue
         
-        is_chicken_leg = False
+        #is_chicken_leg = False
         
         # 使用URL列表进行操作
         for i, post_url in enumerate(selected_urls):
@@ -239,8 +239,8 @@ def nodeseek_comment(driver):
                 driver.get(post_url)
                 
                 # 处理加鸡腿
-                if is_chicken_leg is False:
-                    is_chicken_leg = click_chicken_leg(driver)
+                #if is_chicken_leg is False:
+                #    is_chicken_leg = click_chicken_leg(driver)
                 
                 # 等待 CodeMirror 编辑器加载
                 editor = WebDriverWait(driver, 30).until(
