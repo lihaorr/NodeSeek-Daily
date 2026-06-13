@@ -41,8 +41,9 @@ else:
 def should_run_now():
     """
     GitHub Actions 每小时触发一次。
-    这里按 UTC+8 每天随机抽一个小时，只有命中该小时才真正执行。
-    手动运行 workflow_dispatch 时直接执行，方便测试。
+    每天在 UTC+8 的 0-22 点内随机抽多个小时。
+    命中其中一个小时才运行。
+    仅用于生成评论草稿，不自动发布。
     """
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
 
@@ -56,13 +57,18 @@ def should_run_now():
     seed = os.environ.get("NS_RANDOM_SEED", "nodeseek-daily")
     random_source = random.Random(f"{today}-{seed}")
 
-    target_hour = random_source.randint(0, 23)
-    delay_minutes = random_source.randint(0, 45)
+    runs_per_day = int(os.environ.get("NS_DRAFT_RUNS_PER_DAY", "3"))
+    runs_per_day = max(1, min(runs_per_day, 8))
+
+    available_hours = list(range(0, 23))
+    target_hours = sorted(random_source.sample(available_hours, runs_per_day))
+
+    delay_minutes = random_source.randint(0, 40)
 
     print(f"当前 UTC+8 时间：{now.strftime('%Y-%m-%d %H:%M')}")
-    print(f"今天随机执行小时：{target_hour}:00 - {target_hour}:59")
+    print(f"今天随机运行小时：{target_hours}")
 
-    if now.hour != target_hour:
+    if now.hour not in target_hours:
         print("当前小时未命中，跳过本次执行")
         return False
 
@@ -219,8 +225,10 @@ def nodeseek_comment(driver):
         
         # 过滤掉置顶帖
         valid_posts = [post for post in posts if not post.find_elements(By.CSS_SELECTOR, '.pined')]
-        selected_posts = random.sample(valid_posts, min(20, len(valid_posts)))
-        
+        comment_count = random.randint(0, 2)
+        selected_posts = random.sample(valid_posts, min(comment_count, len(valid_posts)))
+
+        print(f"本次计划评论 {len(selected_posts)} 个帖子")        
         # 存储已选择的帖子URL
         selected_urls = []
         for post in selected_posts:
