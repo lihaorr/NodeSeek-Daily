@@ -38,6 +38,7 @@ jobs:
           NS_RANDOM: ${{ secrets.NS_RANDOM }}
           NS_COMMENT_TEXTS: ${{ vars.NS_COMMENT_TEXTS }}
           NS_RANDOM_SEED: ${{ secrets.NS_RANDOM_SEED }}
+          NS_DRAFT_RUNS_PER_DAY: "21"
           HEADLESS: "true"
         run: |
           python nodeseek_daily.py
