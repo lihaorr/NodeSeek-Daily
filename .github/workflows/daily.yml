@@ -1,11 +1,9 @@
 name: NodeSeek 自动签到评论加鸡腿
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
   schedule:
-    - cron: '00 16 * * *'  # UTC 16:00，即北京时间 00:00
+    - cron: '17 * * * *'
 
 jobs:
   run-nodeseek-daily:
@@ -14,7 +12,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      
+
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
@@ -38,6 +36,8 @@ jobs:
         env:
           NS_COOKIE: ${{ secrets.NS_COOKIE }}
           NS_RANDOM: ${{ secrets.NS_RANDOM }}
+          NS_COMMENT_TEXTS: ${{ vars.NS_COMMENT_TEXTS }}
+          NS_RANDOM_SEED: ${{ secrets.NS_RANDOM_SEED }}
           HEADLESS: "true"
         run: |
           python nodeseek_daily.py
