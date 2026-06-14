@@ -60,7 +60,7 @@ def should_run_now():
     seed = os.environ.get("NS_RANDOM_SEED", "nodeseek-daily")
     random_source = random.Random(f"{today}-{seed}")
 
-    runs_per_day = int(os.environ.get("NS_DRAFT_RUNS_PER_DAY", "3"))
+    runs_per_day = int(os.environ.get("NS_DRAFT_RUNS_PER_DAY", "7"))
     runs_per_day = max(1, min(runs_per_day, 8))
 
     available_hours = list(range(0, 23))
