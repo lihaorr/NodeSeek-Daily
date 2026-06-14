@@ -23,7 +23,7 @@ cookie = os.environ.get("NS_COOKIE") or os.environ.get("COOKIE")
 headless = os.environ.get("HEADLESS", "true").lower() == "true"
 
 default_comments = [
-    "截图发下看看",
+    "观察下看看",
     "靠 这么便宜 不错",
     "看着挺火的这机器，搜索后",
     "好🐔啊。",
@@ -288,7 +288,11 @@ def nodeseek_comment(driver):
                 # 返回交易区
                 # driver.get(target_url)
                 # time.sleep(2)  # 等待页面加载
-                time.sleep(random.uniform(2,5))
+                # 评论完成后，非最后一条才等待
+                if i < len(selected_urls) - 1:
+                    sleep_seconds = random.randint(60, 300)
+                    print(f"等待 {sleep_seconds // 60} 分 {sleep_seconds % 60} 秒后继续下一条评论")
+                    time.sleep(sleep_seconds)
                 
             except Exception as e:
                 print(f"处理帖子时出错: {str(e)}")
