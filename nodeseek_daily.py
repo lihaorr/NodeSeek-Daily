@@ -228,7 +228,7 @@ def nodeseek_comment(driver):
         
         # 过滤掉置顶帖
         valid_posts = [post for post in posts if not post.find_elements(By.CSS_SELECTOR, '.pined')]
-        comment_count = random.randint(0, 2)
+        comment_count = random.randint(2, 4)
         selected_posts = random.sample(valid_posts, min(comment_count, len(valid_posts)))
 
         print(f"本次计划评论 {len(selected_posts)} 个帖子")        
