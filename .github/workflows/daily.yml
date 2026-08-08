@@ -2,6 +2,7 @@ name: NodeSeek 自动签到评论加鸡腿
 
 on:
   workflow_dispatch:
+  pull_request:
   schedule:
     - cron: '17 * * * *'
 
@@ -32,7 +33,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
       - name: Run NodeSeek script
+        if: github.event_name != 'pull_request'
         env:
           NS_COOKIE: ${{ secrets.NS_COOKIE }}
           NS_RANDOM: ${{ secrets.NS_RANDOM }}

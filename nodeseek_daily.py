@@ -5,6 +5,8 @@ Licensed under the MIT License.
 See LICENSE file in the project root for full license information.
 """
 import os
+import re
+import subprocess
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -40,6 +42,37 @@ if env_comments:
     randomInputStr = [x.strip() for x in env_comments.split("|") if x.strip()]
 else:
     randomInputStr = default_comments
+
+
+def detect_chrome_runtime():
+    chrome_executable = uc.find_chrome_executable()
+    if not chrome_executable:
+        raise RuntimeError("未找到 Chrome 或 Chromium 可执行文件")
+
+    try:
+        version_result = subprocess.run(
+            [chrome_executable, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return handle_chrome_version_failure(chrome_executable, str(error))
+
+    version_output = f"{version_result.stdout} {version_result.stderr}".strip()
+    version_match = re.search(r"\b(\d+)(?:\.\d+){3}\b", version_output)
+    if version_result.returncode != 0 or not version_match:
+        return handle_chrome_version_failure(chrome_executable, version_output or "无输出")
+
+    return chrome_executable, int(version_match.group(1))
+
+
+def handle_chrome_version_failure(chrome_executable, details):
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        raise RuntimeError(f"无法读取 Chrome/Chromium 版本: {details}")
+    print(f"警告：无法读取 Chrome/Chromium 版本，将使用 UC 默认版本检测: {details}")
+    return chrome_executable, None
 
 def should_run_now():
     """
@@ -156,6 +189,10 @@ def setup_driver_and_cookies():
         if not cookie:
             print("未找到cookie配置")
             return None
+
+        chrome_executable, chrome_major_version = detect_chrome_runtime()
+        if chrome_major_version is not None:
+            print(f"检测到 Chrome/Chromium 主版本: {chrome_major_version}")
             
         print("开始初始化浏览器...")
         options = uc.ChromeOptions()
@@ -173,7 +210,13 @@ def setup_driver_and_cookies():
             options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
         
         print("正在启动Chrome...")
-        driver = uc.Chrome(options=options)
+        chrome_arguments = {
+            "options": options,
+            "browser_executable_path": chrome_executable,
+        }
+        if chrome_major_version is not None:
+            chrome_arguments["version_main"] = chrome_major_version
+        driver = uc.Chrome(**chrome_arguments)
         
         if headless:
             # 执行 JavaScript 来修改 webdriver 标记
