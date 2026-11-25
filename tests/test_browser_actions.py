@@ -16,6 +16,35 @@ def html_reply(identifier, author, text):
 
 
 class BrowserContractTests(unittest.TestCase):
+    def test_account_identity_accepts_real_right_panel_card(self):
+        from types import SimpleNamespace
+        page = ('<div id="nsk-right-panel-container"><div class="user-card">'
+                '<div class="user-head"><a href="/space/40573">Avatar</a>'
+                '<div class="menu"><a href="/space/40573">lihaorr</a></div>'
+                '</div></div></div>')
+        self.assertIsNone(assert_account(SimpleNamespace(page_source=page), "40573"))
+        with self.assertRaises(PageBlocked):
+            assert_account(SimpleNamespace(page_source=page), "42")
+
+    def test_account_identity_rejects_profile_links_outside_account_card(self):
+        from types import SimpleNamespace
+        page = ('<div id="nsk-right-panel-container"><div class="user-card">'
+                '<div class="user-head"><a href="/space/7">Other</a></div></div>'
+                '<div class="new-users"><a href="/space/40573">New member</a></div></div>')
+        with self.assertRaises(PageBlocked):
+            assert_account(SimpleNamespace(page_source=page), "40573")
+
+    def test_blocked_page_reports_fixed_category_without_raw_title(self):
+        from types import SimpleNamespace
+        for markup, category in [
+                ('<title>Just a moment... private-detail</title>', 'site_verification'),
+                ('<title>429 Too many requests private-detail</title>', 'rate_limited'),
+                ('<title>403 Forbidden private-detail</title>', 'access_denied')]:
+            with self.subTest(category=category), self.assertRaises(PageBlocked) as caught:
+                ensure_page(SimpleNamespace(page_source=markup))
+            self.assertIn(category, str(caught.exception))
+            self.assertNotIn('private-detail', str(caught.exception))
+
     def test_challenge_page_aborts_instead_of_attempting_editor_or_checkin(self):
         driver = Mock(page_source='<html><title>Just a moment...</title></html>')
         with self.assertRaises(PageBlocked):

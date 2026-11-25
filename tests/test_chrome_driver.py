@@ -11,6 +11,22 @@ import nodeseek_daily
 
 
 class ChromeDriverInitializationTests(unittest.TestCase):
+    def test_blocked_refresh_logs_stage_and_category_without_page_or_cookie(self):
+        fake_driver = MagicMock()
+        fake_driver.page_source = '<title>Just a moment... private-page-detail</title>'
+        output = io.StringIO()
+        with patch.dict(os.environ, {'NS_COOKIE': 'session=private-cookie'}, clear=True), \
+             patch.object(nodeseek_daily, 'detect_chrome_runtime', return_value=('/chrome', 150)), \
+             patch.object(nodeseek_daily.uc, 'Chrome', return_value=fake_driver), \
+             redirect_stdout(output):
+            result = nodeseek_daily.setup_driver_and_cookies()
+        self.assertIsNone(result)
+        self.assertIn('authenticated-refresh', output.getvalue())
+        self.assertIn('site_verification', output.getvalue())
+        self.assertNotIn('private-cookie', output.getvalue())
+        self.assertNotIn('private-page-detail', output.getvalue())
+        fake_driver.quit.assert_called_once()
+
     def test_uses_installed_chrome_major_version_for_uc(self):
         chrome_path = "/usr/bin/chromium-browser"
         fake_driver = MagicMock()

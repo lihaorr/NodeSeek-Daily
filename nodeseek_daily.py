@@ -46,11 +46,13 @@ def handle_chrome_version_failure(chrome_executable, details):
 
 def setup_driver_and_cookies():
     driver = None
+    stage = "configuration"
     try:
         cookie = os.environ.get("NS_COOKIE") or os.environ.get("COOKIE")
         if not cookie or not any("=" in item for item in cookie.split(";")):
             print("未找到有效 Cookie 配置")
             return None
+        stage = "chrome-start"
         chrome_executable, major = detect_chrome_runtime()
         options = uc.ChromeOptions()
         options.add_argument("--no-sandbox")
@@ -63,7 +65,9 @@ def setup_driver_and_cookies():
             arguments["version_main"] = major
         driver = uc.Chrome(**arguments)
         driver.set_page_load_timeout(45)
+        stage = "initial-navigation"
         driver.get("https://www.nodeseek.com/")
+        stage = "loading-cookies"
         added = 0
         for item in cookie.split(";"):
             if "=" not in item:
@@ -74,11 +78,14 @@ def setup_driver_and_cookies():
                 added += 1
         if not added:
             raise ValueError("Cookie 中没有有效键值对")
+        stage = "authenticated-refresh"
         driver.refresh()
         ensure_page(driver)
         return driver
     except Exception as error:
-        print(f"浏览器或登录初始化失败：{type(error).__name__}")
+        print(f"浏览器或登录初始化失败：stage={stage}；{type(error).__name__}")
+        if isinstance(error, PageBlocked):
+            print(str(error))
         if driver is not None:
             driver.quit()
         return None
