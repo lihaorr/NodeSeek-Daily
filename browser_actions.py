@@ -20,9 +20,17 @@ class PageBlocked(RuntimeError):
 def ensure_page(driver):
     soup = BeautifulSoup(driver.page_source, "html.parser")
     title = soup.title.get_text(" ", strip=True).lower() if soup.title else ""
-    if (any(text in title for text in ("just a moment", "attention required", "access denied", "too many requests", "429", "403 forbidden"))
+    category = None
+    if (any(text in title for text in ("just a moment", "attention required"))
             or soup.select_one("#challenge-running, #cf-challenge-running, #challenge-form")):
-        raise PageBlocked("遇到访问受限或站点验证页，停止操作；请人工检查运行环境")
+        category = "site_verification"
+    elif any(text in title for text in ("too many requests", "429")):
+        category = "rate_limited"
+    elif any(text in title for text in ("access denied", "403 forbidden")):
+        category = "access_denied"
+    if category:
+        # Fixed categories are useful in public CI logs; never print page content.
+        raise PageBlocked(f"page={category}；遇到访问受限或站点验证页，停止操作；请人工检查运行环境")
     return soup
 
 
@@ -39,9 +47,10 @@ def profile_id(link):
 
 def assert_account(driver, user_id):
     soup = ensure_page(driver)
-    links = soup.select("header a[href], nav a[href], .user-panel a[href], .nsk-header a[href], #nsk-head a[href]")
+    links = soup.select("header a[href], nav a[href], .user-panel a[href], .nsk-header a[href], #nsk-head a[href], "
+                        "#nsk-right-panel-container > .user-card .user-head a[href]")
     if not any(profile_id(link.get("href")) == user_id for link in links):
-        raise PageBlocked("无法从导航栏确认当前登录账号与 NS_USER_ID 一致，停止操作")
+        raise PageBlocked("无法从导航栏或账号卡片确认当前登录账号与 NS_USER_ID 一致，停止操作")
 
 
 def author_id(node):
