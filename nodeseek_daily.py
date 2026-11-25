@@ -1,408 +1,180 @@
 # -- coding: utf-8 --
+"""NodeSeek check-in and lottery replies. Default execution is read-only preview.
+
+Copyright (c) 2024 [Hosea]. Licensed under the MIT License.
 """
-Copyright (c) 2024 [Hosea]
-Licensed under the MIT License.
-See LICENSE file in the project root for full license information.
-"""
+import argparse
+import json
 import os
+from pathlib import Path
 import re
 import subprocess
-from bs4 import BeautifulSoup
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import random
 import time
-import traceback
+
+import setuptools  # noqa: F401  # undetected-chromedriver needs distutils on recent Python.
 import undetected_chromedriver as uc
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.action_chains import ActionChains
-from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
 
-ns_random = os.environ.get("NS_RANDOM","false")
-cookie = os.environ.get("NS_COOKIE") or os.environ.get("COOKIE")
-# 通过环境变量控制是否使用无头模式，默认为 True（无头模式）
-headless = os.environ.get("HEADLESS", "true").lower() == "true"
-
-default_comments = [
-    "观察下看看",
-    "靠 这么便宜 不错",
-    "看着挺火的这机器，搜索后",
-    "好🐔啊。",
-    "好鸡绑定",
-    "插个眼 :xhj001: ",
-    "蹲一下看",
-    "还滴是佬友们啊",
-    " :xhj007: ",
-]
-
-env_comments = os.environ.get("NS_COMMENT_TEXTS", "").strip()
-
-if env_comments:
-    randomInputStr = [x.strip() for x in env_comments.split("|") if x.strip()]
-else:
-    randomInputStr = default_comments
+from browser_actions import PageBlocked, assert_account, click_sign_icon, ensure_page, prepare_reply
+from lottery import beijing_day, default_comments, fetch_posts, parse_feed, run_replies, utc_now
+from state_store import FileStateStore, GitHubStateStore
 
 
 def detect_chrome_runtime():
-    chrome_executable = uc.find_chrome_executable()
+    chrome_executable = os.environ.get("CHROME_PATH") or uc.find_chrome_executable()
     if not chrome_executable:
         raise RuntimeError("未找到 Chrome 或 Chromium 可执行文件")
-
     try:
-        version_result = subprocess.run(
-            [chrome_executable, "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        version_result = subprocess.run([chrome_executable, "--version"],
+                                        capture_output=True, text=True, timeout=10, check=False)
     except (OSError, subprocess.SubprocessError) as error:
         return handle_chrome_version_failure(chrome_executable, str(error))
-
     version_output = f"{version_result.stdout} {version_result.stderr}".strip()
     version_match = re.search(r"\b(\d+)(?:\.\d+){3}\b", version_output)
     if version_result.returncode != 0 or not version_match:
         return handle_chrome_version_failure(chrome_executable, version_output or "无输出")
-
     return chrome_executable, int(version_match.group(1))
 
 
 def handle_chrome_version_failure(chrome_executable, details):
     if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
-        raise RuntimeError(f"无法读取 Chrome/Chromium 版本: {details}")
-    print(f"警告：无法读取 Chrome/Chromium 版本，将使用 UC 默认版本检测: {details}")
+        raise RuntimeError("无法读取 Chrome/Chromium 版本")
+    print("警告：无法读取 Chrome/Chromium 版本，将使用 UC 默认版本检测")
     return chrome_executable, None
 
-def should_run_now():
-    """
-    GitHub Actions 每小时触发一次。
-    每天在 UTC+8 的 0-22 点内随机抽多个小时。
-    命中其中一个小时才运行。
-    仅用于生成评论草稿，不自动发布。
-    """
-    event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-
-    if event_name == "workflow_dispatch":
-        print("手动触发，直接执行")
-        return True
-
-    now = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8)))
-    today = now.strftime("%Y-%m-%d")
-
-    seed = os.environ.get("NS_RANDOM_SEED", "nodeseek-daily")
-    random_source = random.Random(f"{today}-{seed}")
-
-    runs_per_day = int(os.environ.get("NS_DRAFT_RUNS_PER_DAY", "7"))
-    runs_per_day = max(1, min(runs_per_day, 8))
-
-    available_hours = list(range(0, 23))
-    target_hours = sorted(random_source.sample(available_hours, runs_per_day))
-
-    delay_minutes = random_source.randint(0, 40)
-
-    print(f"当前 UTC+8 时间：{now.strftime('%Y-%m-%d %H:%M')}")
-    print(f"今天随机运行小时：{target_hours}")
-
-    if now.hour not in target_hours:
-        print("当前小时未命中，跳过本次执行")
-        return False
-
-    print(f"命中随机小时，延迟 {delay_minutes} 分钟后执行")
-    time.sleep(delay_minutes * 60)
-    return True
-    
-def click_sign_icon(driver):
-    """
-    尝试点击签到图标和试试手气按钮的通用方法
-    """
-    try:
-        print("开始查找签到图标...")
-        # 使用更精确的选择器定位签到图标
-        sign_icon = WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.XPATH, "//span[@title='签到']"))
-        )
-        print("找到签到图标，准备点击...")
-        
-        # 确保元素可见和可点击
-        driver.execute_script("arguments[0].scrollIntoView(true);", sign_icon)
-        time.sleep(0.5)
-        
-        # 打印元素信息
-        print(f"签到图标元素: {sign_icon.get_attribute('outerHTML')}")
-        
-        # 尝试点击
-        try:
-            
-            
-            sign_icon.click()
-            print("签到图标点击成功")
-        except Exception as click_error:
-            print(f"点击失败，尝试使用 JavaScript 点击: {str(click_error)}")
-            driver.execute_script("arguments[0].click();", sign_icon)
-        
-        print("等待页面跳转...")
-        time.sleep(5)
-        
-        # 打印当前URL
-        print(f"当前页面URL: {driver.current_url}")
-        
-        # 点击"试试手气"按钮
-        try:
-            click_button:None
-            
-            if ns_random:
-                click_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '试试手气')]"))
-            )
-            else:
-                click_button = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '鸡腿 x 5')]"))
-            )
-            
-            click_button.click()
-            print("完成试试手气点击")
-        except Exception as lucky_error:
-            print(f"试试手气按钮点击失败或者签到过了: {str(lucky_error)}")
-            
-        return True
-        
-    except Exception as e:
-        print(f"签到过程中出错:")
-        print(f"错误类型: {type(e).__name__}")
-        print(f"错误信息: {str(e)}")
-        print(f"当前页面URL: {driver.current_url}")
-        print(f"当前页面源码片段: {driver.page_source[:500]}...")
-        print("详细错误信息:")
-        traceback.print_exc()
-        return False
 
 def setup_driver_and_cookies():
-    """
-    初始化浏览器并设置cookie的通用方法
-    返回: 设置好cookie的driver实例
-    """
+    driver = None
     try:
         cookie = os.environ.get("NS_COOKIE") or os.environ.get("COOKIE")
-        headless = os.environ.get("HEADLESS", "true").lower() == "true"
-        
-        if not cookie:
-            print("未找到cookie配置")
+        if not cookie or not any("=" in item for item in cookie.split(";")):
+            print("未找到有效 Cookie 配置")
             return None
-
-        chrome_executable, chrome_major_version = detect_chrome_runtime()
-        if chrome_major_version is not None:
-            print(f"检测到 Chrome/Chromium 主版本: {chrome_major_version}")
-            
-        print("开始初始化浏览器...")
+        chrome_executable, major = detect_chrome_runtime()
         options = uc.ChromeOptions()
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        
-        if headless:
-            print("启用无头模式...")
-            options.add_argument('--headless')
-            # 添加以下参数来绕过 Cloudflare 检测
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument('--disable-gpu')
-            options.add_argument('--window-size=1920,1080')
-            # 设置 User-Agent
-            options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-        
-        print("正在启动Chrome...")
-        chrome_arguments = {
-            "options": options,
-            "browser_executable_path": chrome_executable,
-        }
-        if chrome_major_version is not None:
-            chrome_arguments["version_main"] = chrome_major_version
-        driver = uc.Chrome(**chrome_arguments)
-        
-        if headless:
-            # 执行 JavaScript 来修改 webdriver 标记
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            driver.set_window_size(1920, 1080)
-        
-        print("Chrome启动成功")
-        
-        print("正在设置cookie...")
-        driver.get('https://www.nodeseek.com')
-        
-        # 等待页面加载完成
-        time.sleep(5)
-        
-        for cookie_item in cookie.split(';'):
-            try:
-                name, value = cookie_item.strip().split('=', 1)
-                driver.add_cookie({
-                    'name': name, 
-                    'value': value, 
-                    'domain': '.nodeseek.com',
-                    'path': '/'
-                })
-            except Exception as e:
-                print(f"设置cookie出错: {str(e)}")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--window-size=1920,1080")
+        if os.environ.get("HEADLESS", "true").strip().lower() == "true":
+            options.add_argument("--headless=new")
+        arguments = {"options": options, "browser_executable_path": chrome_executable}
+        if major is not None:
+            arguments["version_main"] = major
+        driver = uc.Chrome(**arguments)
+        driver.set_page_load_timeout(45)
+        driver.get("https://www.nodeseek.com/")
+        added = 0
+        for item in cookie.split(";"):
+            if "=" not in item:
                 continue
-        
-        print("刷新页面...")
+            name, value = item.strip().split("=", 1)
+            if name and value:
+                driver.add_cookie({"name": name, "value": value, "domain": ".nodeseek.com", "path": "/"})
+                added += 1
+        if not added:
+            raise ValueError("Cookie 中没有有效键值对")
         driver.refresh()
-        time.sleep(5)  # 增加等待时间
-        
+        ensure_page(driver)
         return driver
-        
-    except Exception as e:
-        print(f"设置浏览器和Cookie时出错: {str(e)}")
-        print("详细错误信息:")
-        print(traceback.format_exc())
+    except Exception as error:
+        print(f"浏览器或登录初始化失败：{type(error).__name__}")
+        if driver is not None:
+            driver.quit()
         return None
 
-def nodeseek_comment(driver):
+
+def comment_library():
+    custom = os.environ.get("NS_COMMENT_TEXTS", "").strip()
+    if not custom:
+        return default_comments
+    comments = [part.strip() for part in custom.split("|") if part.strip()]
+    if not comments:
+        raise ValueError("NS_COMMENT_TEXTS 没有有效评论")
+    return comments
+
+
+def run_live(store, user_id):
+    state = store.load()
+    if state["account_id"] not in {None, user_id}:
+        raise ValueError("状态已绑定另一个账号，请使用独立状态文件/分支")
+    driver = setup_driver_and_cookies()
+    if driver is None:
+        return 1
     try:
-        print("正在访问交易区...")
-        target_url = 'https://www.nodeseek.com/categories/trade'
-        driver.get(target_url)
-        print("等待页面加载...")
-        
-        # 获取初始帖子列表
-        posts = WebDriverWait(driver, 30).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, '.post-list-item'))
-        )
-        print(f"成功获取到 {len(posts)} 个帖子")
-        
-        # 过滤掉置顶帖
-        valid_posts = [post for post in posts if not post.find_elements(By.CSS_SELECTOR, '.pined')]
-        comment_count = random.randint(2, 4)
-        selected_posts = random.sample(valid_posts, min(comment_count, len(valid_posts)))
+        assert_account(driver, user_id)
+        if state["account_id"] is None:
+            state["account_id"] = user_id
+            store.save(state)
+        day = beijing_day(utc_now())
+        sign_status = state["checkins"].get(day)
+        if not sign_status:
+            # A check-in failure must not suppress discovery/comments unless the page is blocked.
+            sign_status = click_sign_icon(driver)
+            if sign_status in {"confirmed", "already"}:
+                state["checkins"][beijing_day(utc_now())] = sign_status
+                store.save(state)
+        print(f"签到结果：{sign_status}")
+        posts = fetch_posts()
+        result = run_replies(posts, store,
+                             lambda post, text: prepare_reply(driver, post, text, user_id),
+                             live=True, comments=comment_library(), pause_seconds=60)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if sign_status in {"confirmed", "already"} and result["halted"] is None else 1
+    except Exception as error:
+        print(f"任务停止：{type(error).__name__}；未确认结果不会自动重试")
+        return 1
+    finally:
+        driver.quit()
 
-        print(f"本次计划评论 {len(selected_posts)} 个帖子")        
-        # 存储已选择的帖子URL
-        selected_urls = []
-        for post in selected_posts:
-            try:
-                post_link = post.find_element(By.CSS_SELECTOR, '.post-title a')
-                selected_urls.append(post_link.get_attribute('href'))
-            except:
-                continue
-        
-        #is_chicken_leg = False
-        
-        # 使用URL列表进行操作
-        for i, post_url in enumerate(selected_urls):
-            try:
-                print(f"正在处理第 {i+1} 个帖子")
-                driver.get(post_url)
-                
-                # 处理加鸡腿
-                #if is_chicken_leg is False:
-                #    is_chicken_leg = click_chicken_leg(driver)
-                
-                # 等待 CodeMirror 编辑器加载
-                editor = WebDriverWait(driver, 30).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, '.CodeMirror'))
-                )
-                
-                # 点击编辑器区域获取焦点
-                editor.click()
-                time.sleep(0.5)
-                input_text = random.choice(randomInputStr)
 
-                # 模拟输入
-                actions = ActionChains(driver)
-                # 随机输入 randomInputStr
-                for char in input_text:
-                    actions.send_keys(char)
-                    actions.pause(random.uniform(0.1, 0.3))
-                actions.perform()
-                
-                # 等待一下确保内容已经输入
-                time.sleep(2)
-                
-                # 使用更精确的选择器定位提交按钮
-                submit_button = WebDriverWait(driver, 30).until(
-                 EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'submit') and contains(@class, 'btn') and contains(text(), '发布评论')]"))
-                )
-                # 确保按钮可见并可点击
-                driver.execute_script("arguments[0].scrollIntoView(true);", submit_button)
-                time.sleep(0.5)
-                submit_button.click()
-                
-                print(f"已在帖子 {post_url} 中完成评论")
-                
-                # 返回交易区
-                # driver.get(target_url)
-                # time.sleep(2)  # 等待页面加载
-                # 评论完成后，非最后一条才等待
-                if i < len(selected_urls) - 1:
-                    sleep_seconds = random.randint(60, 300)
-                    print(f"等待 {sleep_seconds // 60} 分 {sleep_seconds % 60} 秒后继续下一条评论")
-                    time.sleep(sleep_seconds)
-                
-            except Exception as e:
-                print(f"处理帖子时出错: {str(e)}")
-                continue
-                
-        print("NodeSeek评论任务完成")
-                
-    except Exception as e:
-        print(f"NodeSeek评论出错: {str(e)}")
-        print("详细错误信息:")
-        print(traceback.format_exc())
-
-def click_chicken_leg(driver):
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="NodeSeek 抽奖筛选；默认只预览，不签到、不评论")
+    parser.add_argument("--live", action="store_true", help="实际签到和评论；需 NS_COOKIE、NS_USER_ID")
+    parser.add_argument("--feed-file", type=Path, help="预览本地 RSS 样本，不访问论坛")
+    parser.add_argument("--at", help="本地样本预览的 ISO 时间（必须含时区）")
+    parser.add_argument("--state-file", type=Path, default=Path("state/state.json"))
+    args = parser.parse_args(argv)
+    load_dotenv(override=False)
     try:
-        print("尝试点击加鸡腿按钮...")
-        chicken_btn = WebDriverWait(driver, 5).until(
-            EC.element_to_be_clickable((By.XPATH, '//div[@class="nsk-post"]//div[@title="加鸡腿"][1]'))
-        )
-        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", chicken_btn)
-        time.sleep(0.5)
-        chicken_btn.click()
-        print("加鸡腿按钮点击成功")
-        
-        # 等待确认对话框出现
-        WebDriverWait(driver, 5).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, '.msc-confirm'))
-        )
-        
-        # 检查是否是7天前的帖子
-        try:
-            error_title = driver.find_element(By.XPATH, "//h3[contains(text(), '该评论创建于7天前')]")
-            if error_title:
-                print("该帖子超过7天，无法加鸡腿")
-                ok_btn = driver.find_element(By.CSS_SELECTOR, '.msc-confirm .msc-ok')
-                ok_btn.click()
-                return False
-        except:
-            ok_btn = WebDriverWait(driver, 5).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, '.msc-confirm .msc-ok'))
-            )
-            ok_btn.click()
-            print("确认加鸡腿成功")
-            
-        # 等待确认对话框消失
-        WebDriverWait(driver, 5).until_not(
-            EC.presence_of_element_located((By.CSS_SELECTOR, '.msc-overlay'))
-        )
-        time.sleep(1)  # 额外等待以确保对话框完全消失
-        
-        return True
-        
-    except Exception as e:
-        print(f"加鸡腿操作失败: {str(e)}")
-        return False
+        if args.live and (args.feed_file or args.at):
+            raise ValueError("样本和指定时间只能用于预览")
+        if args.at and not args.feed_file:
+            raise ValueError("--at 仅用于本地 RSS 样本")
+        backend = os.environ.get("NS_STATE_BACKEND", "local").strip().lower()
+        if backend not in {"local", "github"}:
+            raise ValueError("NS_STATE_BACKEND 只支持 local 或 github，禁止静默切换存储")
+        if backend == "github":
+            store = GitHubStateStore(os.environ.get("GITHUB_REPOSITORY"),
+                                     os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"),
+                                     os.environ.get("NS_STATE_BRANCH", "automation-state"))
+        else:
+            store = FileStateStore(args.state_file)
+        if args.live:
+            user_id = os.environ.get("NS_USER_ID", "").strip()
+            if not re.fullmatch(r"[1-9]\d*", user_id):
+                raise ValueError("实际执行需要 NS_USER_ID（个人主页 /space/ 后的数字）")
+            if os.environ.get("GITHUB_EVENT_NAME") in {"pull_request", "pull_request_target"}:
+                raise ValueError("PR 环境禁止账号操作")
+            with store.lock():
+                return run_live(store, user_id)
+        posts = parse_feed(args.feed_file.read_bytes()) if args.feed_file else fetch_posts()
+        moment = utc_now()
+        if args.at:
+            from datetime import datetime
+            moment = datetime.fromisoformat(args.at)
+            if moment.tzinfo is None:
+                raise ValueError("预览时间必须包含时区")
+        result = run_replies(posts, store, None, comments=comment_library(), now=lambda: moment)
+        print(json.dumps({"mode": "preview", "feed_items": len(posts),
+                          "beijing_date": beijing_day(moment), **result}, ensure_ascii=False, indent=2))
+        return 0
+    except (ValueError, OSError, RuntimeError) as error:
+        # Do not log Cookie, tokens, request bodies or page HTML.
+        print(f"配置或读取失败：{type(error).__name__}")
+        if isinstance(error, (ValueError, PageBlocked)):
+            print(str(error))
+        return 1
+
 
 if __name__ == "__main__":
-    print("开始执行NodeSeek评论脚本...")
-
-    if not should_run_now():
-        exit(0)
-
-    driver = setup_driver_and_cookies()
-    if not driver:
-        print("浏览器初始化失败")
-        exit(1)
-
-    nodeseek_comment(driver)
-    click_sign_icon(driver)
-
-    print("脚本执行完成")
+    raise SystemExit(main())

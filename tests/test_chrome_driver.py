@@ -14,6 +14,7 @@ class ChromeDriverInitializationTests(unittest.TestCase):
     def test_uses_installed_chrome_major_version_for_uc(self):
         chrome_path = "/usr/bin/chromium-browser"
         fake_driver = MagicMock()
+        fake_driver.page_source = "<html><title>NodeSeek</title></html>"
 
         with patch.dict(os.environ, {
                  "NS_COOKIE": "session=value",
@@ -63,6 +64,7 @@ class ChromeDriverInitializationTests(unittest.TestCase):
     def test_local_run_falls_back_when_chrome_version_cannot_be_read(self):
         chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
         fake_driver = MagicMock()
+        fake_driver.page_source = "<html><title>NodeSeek</title></html>"
 
         with patch.dict(os.environ, {"NS_COOKIE": "session=value", "HEADLESS": "true"}, clear=True), \
              patch.object(nodeseek_daily.uc, "find_chrome_executable", return_value=chrome_path), \
@@ -84,6 +86,7 @@ class ChromeDriverInitializationTests(unittest.TestCase):
     def test_local_run_falls_back_when_chrome_version_command_times_out(self):
         chrome_path = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
         fake_driver = MagicMock()
+        fake_driver.page_source = "<html><title>NodeSeek</title></html>"
 
         with patch.dict(os.environ, {"NS_COOKIE": "session=value", "HEADLESS": "true"}, clear=True), \
              patch.object(nodeseek_daily.uc, "find_chrome_executable", return_value=chrome_path), \
