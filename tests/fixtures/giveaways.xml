@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic fixtures, not captured authenticated NodeSeek markup. -->
+<rss version="2.0"><channel>
+  <title>Lottery test feed</title>
+  <item><title>黑五抽奖送 VPS</title><description>回复参与，随机抽取一位。</description>
+    <link>https://www.nodeseek.com/post-1001-1</link><pubDate>Wed, 25 Nov 2026 07:00:00 GMT</pubDate></item>
+  <item><title>福利，盖楼送鸡</title><description>评论参加。</description>
+    <link>https://www.nodeseek.com/post-1002-1</link><pubDate>Wed, 25 Nov 2026 07:10:00 GMT</pubDate></item>
+  <item><title>抽奖已结束</title><description>已开奖。</description>
+    <link>https://www.nodeseek.com/post-1003-1</link><pubDate>Wed, 25 Nov 2026 07:20:00 GMT</pubDate></item>
+  <item><title>机器明盘出售</title><description>100 元。</description>
+    <link>https://www.nodeseek.com/post-1004-1</link><pubDate>Wed, 25 Nov 2026 07:30:00 GMT</pubDate></item>
+</channel></rss>
