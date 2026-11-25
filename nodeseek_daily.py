@@ -48,6 +48,15 @@ def setup_driver_and_cookies():
     driver = None
     stage = "configuration"
     try:
+        profile = os.environ.get("NS_PROFILE_DIR", "").strip()
+        if profile:
+            from local_browser import open_profile_browser
+            stage = "profile-start"
+            driver = open_profile_browser(profile, headless=os.environ.get("HEADLESS", "false").lower() == "true")
+            stage = "profile-navigation"
+            driver.get("https://www.nodeseek.com/")
+            ensure_page(driver)
+            return driver
         cookie = os.environ.get("NS_COOKIE") or os.environ.get("COOKIE")
         if not cookie or not any("=" in item for item in cookie.split(";")):
             print("未找到有效 Cookie 配置")
