@@ -1,7 +1,7 @@
 """Browser adapters. Unexpected markup or a challenge stops account actions."""
 import os
-from dataclasses import replace
-from urllib.parse import urlsplit
+import time
+from urllib.parse import parse_qs, urlsplit
 
 from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
@@ -9,7 +9,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException
 
-from lottery import eligible, plain_text, utc_now
+from lottery import SIGNAL, eligible, plain_text, utc_now
+from discovery import BASE_URL, DiscoveryResult, parse_listing, parse_original, search_url
 
 
 class PageBlocked(RuntimeError):
@@ -19,9 +20,9 @@ class PageBlocked(RuntimeError):
 def ensure_page(driver):
     soup = BeautifulSoup(driver.page_source, "html.parser")
     title = soup.title.get_text(" ", strip=True).lower() if soup.title else ""
-    if (any(text in title for text in ("just a moment", "attention required", "access denied"))
+    if (any(text in title for text in ("just a moment", "attention required", "access denied", "too many requests", "429", "403 forbidden"))
             or soup.select_one("#challenge-running, #cf-challenge-running, #challenge-form")):
-        raise PageBlocked("遇到站点验证页，停止操作；请人工检查运行环境")
+        raise PageBlocked("遇到访问受限或站点验证页，停止操作；请人工检查运行环境")
     return soup
 
 
@@ -38,7 +39,7 @@ def profile_id(link):
 
 def assert_account(driver, user_id):
     soup = ensure_page(driver)
-    links = soup.select("header a[href], nav a[href], .user-panel a[href], .nsk-header a[href]")
+    links = soup.select("header a[href], nav a[href], .user-panel a[href], .nsk-header a[href], #nsk-head a[href]")
     if not any(profile_id(link.get("href")) == user_id for link in links):
         raise PageBlocked("无法从导航栏确认当前登录账号与 NS_USER_ID 一致，停止操作")
 
@@ -52,17 +53,14 @@ def reply_entries(html, user_id, text=None):
     """Only stable IDs with an exact author/content match can confirm a reply."""
     soup = BeautifulSoup(html, "html.parser")
     found = set()
-    for node in soup.select(".nsk-post"):
+    for node in soup.select('.content-item:not([id="0"])'):
         if author_id(node) != user_id:
             continue
         content = node.select_one(".post-content")
         if content is None or (text is not None and plain_text(str(content)) != text.strip()):
             continue
-        identifier = node.get("id")
-        if not identifier:
-            anchor = node.select_one('a[href*="#"]')
-            identifier = urlsplit(anchor.get("href", "")).fragment if anchor else None
-        if identifier:
+        identifier = node.get("data-comment-id")
+        if identifier and identifier.isdigit():
             found.add(identifier)
     return found
 
@@ -72,21 +70,19 @@ def prepare_reply(driver, post, comment, user_id):
 
     def loaded(browser):
         ensure_page(browser)
-        return browser.find_elements(By.CSS_SELECTOR, ".nsk-post .post-content")
+        return browser.find_elements(By.CSS_SELECTOR, '.content-item[id="0"] article.post-content')
 
     WebDriverWait(driver, 20).until(loaded)
     assert_account(driver, user_id)
     soup = ensure_page(driver)
-    original = soup.select_one(".nsk-post")
-    content = original.select_one(".post-content") if original else None
-    title = soup.select_one("h1")
-    if content is None or title is None or author_id(original) is None:
+    original = soup.select_one('.content-item[id="0"]')
+    current = parse_original(driver.page_source, post)
+    if author_id(original) is None:
         raise PageBlocked("原帖结构无法可靠识别，未发布评论")
-    current = replace(post, title=title.get_text(" ", strip=True), body=plain_text(str(content)))
     if not eligible(current, utc_now(), full=True) or author_id(original) == user_id:
         return None
     # Also avoid visible manual participation by this account, regardless of wording.
-    if any(author_id(node) == user_id for node in soup.select(".nsk-post")):
+    if any(author_id(node) == user_id for node in soup.select(".content-item")):
         return None
     before = reply_entries(driver.page_source, user_id, comment)
     editor = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".CodeMirror")))
@@ -120,6 +116,64 @@ def prepare_reply(driver, post, comment, user_id):
         except TimeoutException:
             return "unknown"
     return publish
+
+
+def discover_posts(driver, user_id, *, keywords=("抽奖",), recent_pages=5, search_pages=2,
+                   max_inspections=40, exclude_ids=(), pause_seconds=3, sleep=time.sleep, now=utc_now):
+    """Read only: list/search pages, then actual original dates and participation rules."""
+    report = {"pages": {}, "stops": {}, "inspected": 0, "inspection_limit_reached": False}
+    visits = 0
+
+    def read(url):
+        nonlocal visits
+        if visits and pause_seconds:
+            sleep(pause_seconds)
+        visits += 1
+        driver.get(url)
+        ensure_page(driver)
+        actual, expected = urlsplit(driver.current_url), urlsplit(url)
+        if (actual.scheme, actual.netloc, actual.path, parse_qs(actual.query)) != (
+                expected.scheme, expected.netloc, expected.path, parse_qs(expected.query)):
+            raise PageBlocked("论坛页面发生重定向，可能登录已失效；未将其视作零结果")
+        WebDriverWait(driver, 20).until(lambda d: ensure_page(d).select_one("#nsk-frame"))
+        assert_account(driver, user_id)
+        return driver.page_source
+
+    links = {}
+    sources = [("newest", BASE_URL + "/?sortBy=postTime", recent_pages, None)]
+    sources += [("search:" + word, search_url(word), search_pages, word) for word in keywords]
+    for source, url, limit, query in sources:
+        signatures = set()
+        report["pages"][source] = 0
+        for _ in range(limit):
+            page = parse_listing(read(url), url, query=query, newest=query is None)
+            report["pages"][source] += 1
+            signature = tuple(link.id for link in page.links)
+            if signature in signatures:
+                report["stops"][source] = "repeated_page"
+                break
+            signatures.add(signature)
+            for link in page.links:
+                if link.id not in exclude_ids and (query is not None or SIGNAL.search(link.title)):
+                    links.setdefault(link.id, link)
+            if page.next_url is None:
+                report["stops"][source] = "end"
+                break
+            url = page.next_url
+        else:
+            report["stops"][source] = "page_limit"
+    report["candidate_links"] = len(links)
+    report["inspection_limit_reached"] = len(links) > max_inspections
+    posts = []
+    for link in list(links.values())[:max_inspections]:
+        html = read(link.url)
+        post = parse_original(html, link)
+        report["inspected"] += 1
+        soup = BeautifulSoup(html, "html.parser")
+        if (eligible(post, now(), full=True)
+                and not any(author_id(node) == user_id for node in soup.select(".content-item"))):
+            posts.append(post)
+    return DiscoveryResult(posts, report)
 
 
 def reward_xpath():

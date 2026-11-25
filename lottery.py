@@ -17,16 +17,8 @@ DAILY_LIMIT = 10
 FEED_URL = "https://rss.nodeseek.com/"
 
 default_comments = [
-    "感谢楼主的抽奖活动，参与一下，祝大家好运！",
-    "来参加抽奖，感谢楼主送出的福利！",
-    "参与一下，期待这次能有好运气。",
-    "感谢分享福利，我也来试试手气！",
-    "报名参与抽奖，祝活动顺利！",
-    "来凑个热闹，感谢楼主，祝各位好运！",
-    "支持一下抽奖活动，希望好运能轮到我。",
-    "谢谢楼主的福利，参与抽奖试试运气！",
-    "这次抽奖我也参加，感谢楼主！",
-    "参与一波，祝大家都能收获好心情！",
+    "参与一下", "我也来啦", "试试手气", "支持一下", "感谢楼主",
+    "来沾好运", "希望中奖", "抽我抽我", "好人好运", "重在参与",
 ]
 
 
@@ -37,6 +29,7 @@ class Post:
     url: str
     body: str
     published_at: datetime
+    draw_at: datetime | None = None
 
 
 def utc_now():
@@ -132,7 +125,8 @@ def eligible(post, now, full=False):
     text = f"{post.title}\n{post.body}"
     if not SIGNAL.search(text) or CLOSED.search(text) or IRRELEVANT.search(post.title):
         return False
-    if full and (SPECIAL_REPLY.search(text) or not PARTICIPATION.search(text) or expired_deadline(text, now)):
+    if full and (SPECIAL_REPLY.search(text) or not PARTICIPATION.search(text)
+                 or expired_deadline(text, now) or (post.draw_at is not None and post.draw_at <= now)):
         return False
     return True
 

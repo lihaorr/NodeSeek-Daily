@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: preview 只筛选；live 实际签到和评论
+        description: preview RSS；search-preview 登录只读搜索；live 实际签到和评论
         type: choice
-        options: [preview, live]
+        options: [preview, search-preview, live]
         default: preview
   pull_request:
   push:
@@ -71,7 +71,7 @@ jobs:
             exit 1
           fi
       - name: Set up Chrome
-        if: env.LIVE_REQUESTED == 'true'
+        if: env.LIVE_REQUESTED == 'true' || inputs.mode == 'search-preview'
         id: chrome
         uses: browser-actions/setup-chrome@48483d551c22a1fe6154c6a195ccc6d5773dc8c4 # v2
         with:
@@ -85,6 +85,10 @@ jobs:
           NS_USER_ID: ${{ vars.NS_USER_ID }}
           NS_RANDOM: ${{ secrets.NS_RANDOM }}
           NS_COMMENT_TEXTS: ${{ vars.NS_COMMENT_TEXTS }}
+          NS_SEARCH_KEYWORDS: ${{ vars.NS_SEARCH_KEYWORDS }}
+          NS_SEARCH_PAGES: ${{ vars.NS_SEARCH_PAGES }}
+          NS_RECENT_PAGES: ${{ vars.NS_RECENT_PAGES }}
+          REQUESTED_MODE: ${{ inputs.mode }}
           NS_STATE_BACKEND: github
           NS_STATE_BRANCH: automation-state
           GH_TOKEN: ${{ github.token }}
@@ -92,6 +96,8 @@ jobs:
         run: |
           if [ "$LIVE_REQUESTED" = 'true' ]; then
             python nodeseek_daily.py --live
+          elif [ "$REQUESTED_MODE" = 'search-preview' ]; then
+            python nodeseek_daily.py --search-preview
           else
             python nodeseek_daily.py
           fi

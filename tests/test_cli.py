@@ -38,6 +38,26 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("PR", result.stdout)
 
+    def test_search_preview_rejects_sample_mode_and_pull_request_account_access(self):
+        for args, env in [(('--search-preview', '--feed-file', 'tests/fixtures/giveaways.xml'), {}),
+                          (('--search-preview',), {'GITHUB_EVENT_NAME': 'pull_request', 'NS_USER_ID': '42'})]:
+            with self.subTest(args=args):
+                self.assertEqual(self.invoke(*args, env=env).returncode, 1)
+
+    def test_search_preview_reports_site_failure_instead_of_zero_results(self):
+        import io
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+        import nodeseek_daily
+        from discovery import DiscoveryError
+        message = '站点拒绝搜索：请求限流；本轮不重试'
+        with patch.dict(os.environ, {'NS_STATE_BACKEND': 'local', 'NS_USER_ID': '42'}, clear=True), \
+             patch.object(nodeseek_daily, 'load_dotenv'), \
+             patch.object(nodeseek_daily, 'run_search_preview', side_effect=DiscoveryError(message)), \
+             redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(nodeseek_daily.main(['--search-preview']), 1)
+        self.assertIn(message, out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
