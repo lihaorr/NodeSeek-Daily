@@ -83,6 +83,25 @@ python nodeseek_daily.py --live
 | `GITHUB_REPOSITORY` | Actions 自动提供 | `owner/repo`，GitHub 状态存储使用 |
 | `GH_TOKEN` / `GITHUB_TOKEN` | Actions 自动提供短期令牌 | 仅状态存储需要 Contents 写权限 |
 
+## 当前电脑运行（实验入口，尚未上线验收）
+
+2026-11-25 实测：项目专用的标准 Selenium Chrome 在 NodeSeek 登录页反复遇到 Cloudflare 验证，未能完成登录。**当前电脑方案尚未通过真实搜索、签到或评论验收；没有安装或启用本机计划任务。** 不要把下列入口或通过的本地测试当作上线证明。
+
+`local_runner.py` 使用新建的专用 Chrome 配置目录，拒绝已有且未标记的个人浏览器目录；不复制个人浏览器 Cookie。它通过已登录的 GitHub CLI 在内存中取得令牌，并共用 `automation-state` 状态，保留额度和去重历史。本机文件锁阻止重复进程。需要 Python 依赖、Chrome、匹配的 ChromeDriver 和已登录的 `gh`；可用 `CHROME_PATH` / `CHROMEDRIVER_PATH` 指定路径。
+
+```powershell
+# 仅在站点支持该运行方式且访问问题已解决后使用。
+python local_runner.py --login --user-id 40573
+# 登录成功且确认账号后，先进行只读搜索验收。
+python local_runner.py --search-preview --user-id 40573
+# 搜索验收通过后才进行真实账号操作。
+python local_runner.py --live --user-id 40573
+```
+
+默认专用数据目录为忽略的 `state/local/`，可用 `NS_LOCAL_DIR` 指定另一个项目专用目录。请保存该目录和远程历史；不要删除状态来重试。登录入口遇到已识别的安全验证、限流或拒绝访问页会退出并关闭专用浏览器，不刷新、不反复尝试。普通未登录页面最多等待 15 分钟，只有精确确认账号后才报告登录成功。
+
+Cloudflare 官方说明 Selenium 等自动浏览器不受支持用于完成生产验证。遇到循环验证时，应结束本次运行并核实站点允许的可用接入方式；这不是继续点击或再次运行就能保证解决的问题。本入口不包含验证码处理、隐藏自动化特征或访问限制绕过，也不安装定时任务。
+
 ## GitHub Actions
 
 PR 和 `feat/**` 推送只运行测试与离线预览，不读取论坛 Cookie 执行账号操作。定时任务每小时第 17 分钟触发；GitHub 调度可能延迟，不保证准点。

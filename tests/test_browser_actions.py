@@ -50,6 +50,14 @@ class BrowserContractTests(unittest.TestCase):
         with self.assertRaises(PageBlocked):
             ensure_page(driver)
 
+    def test_chinese_challenge_title_stops_without_requiring_a_form_marker(self):
+        for title in ('请稍候...', '请稍等...'):
+            with self.subTest(title=title):
+                driver = Mock(page_source=f'<html><title>{title}</title>'
+                              '<h2>正在进行安全验证</h2></html>')
+                with self.assertRaisesRegex(PageBlocked, 'page=site_verification'):
+                    ensure_page(driver)
+
     def test_account_identity_must_be_from_header_not_an_author_or_mention(self):
         driver = Mock(page_source='<header><a href="/space/12">Other</a></header>'
                       + html_reply("reply-1", "42", "test"))

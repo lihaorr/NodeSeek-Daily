@@ -17,11 +17,15 @@ class PageBlocked(RuntimeError):
     pass
 
 
+class AccountUnconfirmed(PageBlocked):
+    """The page is accessible, but the required account is not visible."""
+
+
 def ensure_page(driver):
     soup = BeautifulSoup(driver.page_source, "html.parser")
     title = soup.title.get_text(" ", strip=True).lower() if soup.title else ""
     category = None
-    if (any(text in title for text in ("just a moment", "attention required"))
+    if (any(text in title for text in ("just a moment", "attention required", "请稍候", "请稍等"))
             or soup.select_one("#challenge-running, #cf-challenge-running, #challenge-form")):
         category = "site_verification"
     elif any(text in title for text in ("too many requests", "429")):
@@ -50,7 +54,7 @@ def assert_account(driver, user_id):
     links = soup.select("header a[href], nav a[href], .user-panel a[href], .nsk-header a[href], #nsk-head a[href], "
                         "#nsk-right-panel-container > .user-card .user-head a[href]")
     if not any(profile_id(link.get("href")) == user_id for link in links):
-        raise PageBlocked("无法从导航栏或账号卡片确认当前登录账号与 NS_USER_ID 一致，停止操作")
+        raise AccountUnconfirmed("无法从导航栏或账号卡片确认当前登录账号与 NS_USER_ID 一致，停止操作")
 
 
 def author_id(node):
